@@ -1,4 +1,5 @@
 require 'active_form'
+
 module RestfulWorkflow
   module DSL
     def self.extended(base)
@@ -15,6 +16,8 @@ module RestfulWorkflow
       include Actions
       include Filters
       include Callbacks
+      attr_reader :current_object
+      helper ::RestfulWorkflow::Helpers
       yield Stage.new(self)
       self.workflow_active = true
       self
@@ -27,39 +30,74 @@ module RestfulWorkflow
     end
   end
 
+  module Helpers
+    def link_forward(contents)
+      link_to contents, @step.forward_url
+    end
+    
+    def link_back(contents)
+      link_to contents, @step.back_url
+    end
+    
+    def each_step(&block)
+      @controller.class.steps.each {|step|
+        step.controller = @controller
+        yield step
+      }
+    end
+  end
+
   module Filters
     def self.included(base)
-      base.prepend_before_filter :load_step
+      base.before_filter :init_data, :only => [:show, :update]
+      base.before_filter :load_current_object, :only => [:show, :update]
+      base.prepend_before_filter :load_step, :only => [:show, :update]
+      base.prepend_before_filter :init_steps
     end
 
     def load_step
       @step = self.class.find_step(params[:id])
     end
+    
+    def init_steps
+      self.class.steps.each {|s| s.controller = self }
+    end
+
+    def init_data
+      @step.eval_deferred_data_class
+    end
+    
+    def load_current_object
+      case action_name
+      when 'show'
+        @current_object = @step.load_data
+      when 'update'
+        @current_object = @step.data.new(params[:current_object])
+      end
+      @current_object.controller = self if @current_object.respond_to?(:controller)
+    end
+    
   end
 
   module Actions
     def index
-      redirect_to :action => "show", :id => self.class.steps.first.name
+      first_uncompleted_step = self.class.steps.find {|step| !step.completed? }
+      redirect_to :action => "show", :id => (first_uncompleted_step || self.class.steps.first).name
     end
     
     def show
+      @step.data_block
       before :show
-      @current_object = @step.load_data(self)
-      after :show
-      render :action => @step.name
+      render :action => @step.view
     end
 
     def update
       before :update
-      @current_object = @step.data.new(params[:current_object])
-      @current_object.controller = self if @current_object.respond_to?(:controller)
-      after :update
-      if @current_object.valid?
-        redirect_to @step.go_forward(self)
+      if @current_object.save
+        redirect_to @step.forward_url
       else
         before :show
-        render :action => @step.name
-        after :show
+        render :action => @step.view
       end
     end
   end
@@ -77,31 +115,52 @@ module RestfulWorkflow
   end
 
   class Stage
-    attr_accessor :controller
-    def initialize(controller)
-      @controller = controller
+    attr_accessor :controller_class
+    def initialize(controller_class)
+      @controller_class = controller_class
     end
 
     def method_missing(method, *args, &block)
       step = Step.new(method.to_s, self, *args)
-      controller.steps << step
+      controller_class.steps << step
       step.instance_eval(&block) if block_given?
       step
     end
   end
 
   class Step
-    attr_accessor :stage, :name
+    attr_accessor :stage, :name, :controller, :long_name, :view, :in_menu, :data_block
     def initialize(name, stage, *args)
       @name = name
+      @view = name
       @stage = stage
+      @in_menu = true
       @before_callbacks = {}
       @after_callbacks = {}
       initialize_data_class
     end
     
+    def long_name(new_val=nil)
+      @long_name = new_val if new_val
+      @long_name
+    end
+    
+    def view(new_val=nil)
+      @view = new_val if new_val
+      @view
+    end
+
+    def in_menu(new_val=nil)
+      @in_menu = new_val unless new_val.nil?
+      @in_menu
+    end
+    
+    def in_menu?
+      @in_menu
+    end
+    
     def controller_class
-      stage.controller
+      stage.controller_class
     end
 
     def before(symbol, &block)
@@ -118,22 +177,29 @@ module RestfulWorkflow
       @after_callbacks[symbol.to_sym]
     end
 
-    def data(value=nil, &block)
-      if value
-        @data = value
+    def data(*args, &block)
+      options = args.extract_options!
+      if args.first
+        @data = args.first
       elsif block_given?
-        initialize_data_class
-        @data.class_eval(&block)
+        initialize_data_class 
+        unless options[:defer]
+          @data.class_eval(&block)
+        else
+          @data_block = block
+        end
       end
       @data
     end
 
-    def completed?(controller)
-      controller.session[controller.controller_name][name] rescue nil
+    def completed?
+      # controller.session[controller.controller_name][name] rescue nil
+      load_data.valid?
     end
 
-    def load_data(controller)
-      if attributes = completed?(controller)
+    def load_data
+      #  !@data_block && 
+      if attributes = controller.session[controller.controller_name][name] rescue nil
         @data.new(attributes)
       else
         @data.new
@@ -154,14 +220,14 @@ module RestfulWorkflow
       end
     end
 
-    def go_forward(controller)
+    def forward_url
       if @forward
-        @forward.respond_to?(:call) ? controller.instance_eval(&@forward) : @forward
-      else
-        { :id => (next_step || self).name } 
+        url = @forward.respond_to?(:call) ? controller.instance_eval(&@forward) : @forward
+        url = { :id => url } if url.kind_of?(Symbol)
       end
+      url || { :id => (next_step || self).name } 
     end
-
+    
     def back(value=nil, &block)
       raise ArgumentError, "Value or block required" unless value || block_given?
       @back = if value
@@ -176,14 +242,14 @@ module RestfulWorkflow
       end
     end
 
-    def go_back(controller)
+    def back_url
       if @back
-        @back.respond_to?(:call) ? controller.instance_eval(&@back) : @back
-      else
-        { :id => (previous_step || self).name }
+        url = @back.respond_to?(:call) ? controller.instance_eval(&@back) : @back
+        url = { :id => url } if url.kind_of?(Symbol)
       end
+      url || { :id => (previous_step || self).name }
     end
-
+    
     def first?
       controller_class.steps.first == self
     end
@@ -203,16 +269,25 @@ module RestfulWorkflow
       end
     end
     
+    def eval_deferred_data_class
+      if data_block
+        initialize_data_class
+        data.controller = controller if data.respond_to?(:controller)
+        data.class_eval(&data_block) 
+      end
+    end
+    
     private
+
     def initialize_data_class
       @data = Class.new(ActiveForm)
       @data.class_eval %Q{
-        attr_accessor :controller
+        cattr_accessor :controller
         def save
           returning super do |valid|
             if valid
               controller.session[controller.controller_name] ||= {}
-              controller.session[controller.controller_name][#{name}.intern] = self.attributes
+              controller.session[controller.controller_name]['#{name.intern}'] = self.attributes
             end
           end
         end
@@ -230,6 +305,6 @@ module RestfulWorkflow
         controller_class.steps[controller_class.steps.index(self) - 1]
       end
     end
-    
+
   end
 end

@@ -22,7 +22,7 @@ class ActiveForm < ActiveRecord::Base
   # [+:default+] default value
   # [+:null+] whether it is nullable
   # [+:human_name+] human readable name
-  def self.column(name, options = {})
+  def self.column(name, type="text", options = {})
     name = name.to_s
     options.each { |k,v| options[k] = v.to_s if Symbol === v }
     
@@ -34,7 +34,7 @@ class ActiveForm < ActiveRecord::Base
     columns << ActiveRecord::ConnectionAdapters::Column.new(
       name,
       options.delete(:default),
-      options.delete(:type),
+      type,
       options.include?(:null) ? options.delete(:null) : true
     )
     
