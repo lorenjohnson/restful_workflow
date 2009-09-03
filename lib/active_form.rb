@@ -13,6 +13,7 @@
 #   end
 #
 class ActiveForm < ActiveRecord::Base
+  
   def self.columns # :nodoc:
     @columns ||= []
   end
