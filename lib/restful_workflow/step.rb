@@ -70,7 +70,11 @@ module RestfulWorkflow
 
     def load_data
       if attributes = controller.params[:current_object] rescue nil
-        @data.new(attributes)
+        unless controller.params[:current_object][:id].blank?
+          @data.find(controller.params[:current_object][:id])
+        else
+          @data.new(attributes)
+        end
       else
         @data.new
       end
@@ -150,7 +154,7 @@ module RestfulWorkflow
     private
 
     def initialize_data_class
-      @data = Class.new(ParentHelpForm)
+      @data = Class.new(Interview)
     end
 
     def next_step

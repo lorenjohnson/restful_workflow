@@ -14,7 +14,7 @@ module RestfulWorkflow
 
     def update
       before :update
-      if @current_object.save
+      if @current_object.update_attributes(params[:current_object])
         redirect_to @step.forward_url
       else
         before :show

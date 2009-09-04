@@ -24,7 +24,11 @@ module RestfulWorkflow
       when 'show'
         @current_object = @step.load_data
       when 'update'
-        @current_object = @step.data.new(params[:current_object])
+        unless params[:current_object][:id].blank?
+          @current_object = @step.data.find(params[:current_object][:id])
+        else
+          @current_object = @step.data.new(params[:current_object])
+        end
       end
       @current_object.controller = self if @current_object.respond_to?(:controller)
     end
