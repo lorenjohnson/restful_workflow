@@ -1,6 +1,6 @@
 module RestfulWorkflow
   class Step
-    attr_accessor :stage, :name, :controller, :long_name, :view, :in_menu, :data_block
+    attr_accessor :stage, :name, :controller, :long_name, :view, :in_menu, :data_block, :validations
 
     def initialize(name, stage, *args)
       @name = name
@@ -62,6 +62,13 @@ module RestfulWorkflow
         end
       end
       @data
+    end
+    
+    def validations(&block)
+      if block_given?
+        @validations.class_eval(&block)
+      end
+      @validations
     end
   
     def completed?
@@ -155,6 +162,7 @@ module RestfulWorkflow
 
     def initialize_data_class
       @data = Class.new(Interview)
+      @validations = Class.new(ActiveForm)
     end
 
     def next_step

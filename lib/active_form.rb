@@ -1,52 +1,99 @@
-# = ActiveForm - non persistent ActiveRecord
-#
-# Simple base class to make AR objects without a corresponding database
-# table.  These objects can still use AR validations but can't be saved
-# to the database.
-#
-# == Example
-#
-#   class FeedbackForm < ActiveForm
-#     column :email
-#     column :message, :type => :text
-#     validates_presence_of :email, :message
-#   end
-#
-class ActiveForm < ActiveRecord::Base
+# Note ".valid?" method must occur on object for validates_associated
+class ActiveForm
+  def initialize(attributes = nil)
+    self.attributes = attributes
+    yield self if block_given?
+  end
+ 
+  def attributes=(attributes)
+    attributes.each do |key,value|
+      send(key.to_s + '=', value)
+    end if attributes
+  end
   
-  def self.columns # :nodoc:
-    @columns ||= []
+  # def attributes_with_forgiveness=(attributes)
+  #   attributes.each do |key,value|
+  #     self.class_eval("attr_accessor :#{key.to_sym}")
+  #     send(key.to_s + '=', value)
+  #   end if attributes
+  # end
+ 
+  def attributes
+    attributes = instance_variables
+    attributes.delete("@errors")
+    Hash[*attributes.collect { |attribute| [attribute[1..-1], instance_variable_get(attribute)] }.flatten]
   end
-
-  # Define an attribute.  It takes the following options:
-  # [+:type+] schema type
-  # [+:default+] default value
-  # [+:null+] whether it is nullable
-  # [+:human_name+] human readable name
-  def self.column(name, type="text", options = {})
-    name = name.to_s
-    options.each { |k,v| options[k] = v.to_s if Symbol === v }
-    
-    if human_name = options.delete(:human_name)
-      name.instance_variable_set('@human_name', human_name)
-      def name.humanize; @human_name; end
+ 
+  def [](key)
+    instance_variable_get("@#{key}")
+  end
+ 
+  def []=(key, value)
+    instance_variable_set("@#{key}", value)
+  end
+ 
+  def method_missing( method_id, *args )
+    if md = /_before_type_cast$/.match(method_id.to_s)
+      attr_name = md.pre_match
+      return self[attr_name] if self.respond_to?(attr_name)
     end
-    
-    columns << ActiveRecord::ConnectionAdapters::Column.new(
-      name,
-      options.delete(:default),
-      type,
-      options.include?(:null) ? options.delete(:null) : true
-    )
-    
-    raise ArgumentError.new("unknown option(s) #{options.inspect}") unless options.empty?
+    super
   end
-
-  def self.abstract_class # :nodoc:
+ 
+  def to_xml(options = {})
+    options[:root] ||= self.class.to_s.underscore
+    attributes.to_xml(options)
+  end
+  
+  alias_method :respond_to_without_attributes?, :respond_to?
+ 
+  def new_record?
     true
   end
+ 
+protected
+  def raise_not_implemented_error(*params)
+    ValidatingModel.raise_not_implemented_error(*params)
+  end
+ 
+  def self.human_attribute_name(attribute_key_name)
+    attribute_key_name.humanize
+  end
+ 
+  # these methods must be defined before Validations include
+  alias save raise_not_implemented_error
+  alias update_attribute raise_not_implemented_error
+  alias save! raise_not_implemented_error
   
-  def save # :nodoc:
-    valid?
+  # The following must be defined prior to Callbacks include
+  alias create_or_update raise_not_implemented_error
+  alias create raise_not_implemented_error
+  alias update raise_not_implemented_error
+  alias destroy raise_not_implemented_error
+ 
+  def self.instantiate(record)
+    object = allocate
+    object.attributes = record
+    object
+  end
+ 
+public
+  include ActiveRecord::Validations
+  include ActiveRecord::Callbacks
+ 
+protected
+ 
+  # the following methods must be defined after include so that they overide
+  # methods previously included
+  class << self
+    def raise_not_implemented_error(*params)
+      raise NotImplementedError
+    end
+ 
+    alias validates_uniqueness_of raise_not_implemented_error
+    alias create! raise_not_implemented_error
+    alias validate_on_create raise_not_implemented_error
+    alias validate_on_update raise_not_implemented_error
+    alias save_with_validation raise_not_implemented_error
   end
 end

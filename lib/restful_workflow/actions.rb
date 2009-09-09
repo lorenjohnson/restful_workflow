@@ -14,7 +14,10 @@ module RestfulWorkflow
 
     def update
       before :update
-      if @current_object.update_attributes(params[:current_object])
+      # @validations.attributes_with_forgiveness(params[:current_object])
+      params[:current_object]
+      @current_object.
+      if @validations.valid? && @current_object.update_attributes(params[:current_object])
         redirect_to @step.forward_url
       else
         before :show
