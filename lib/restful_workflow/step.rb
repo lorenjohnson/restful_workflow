@@ -1,6 +1,6 @@
 module RestfulWorkflow
   class Step
-    attr_accessor :stage, :name, :controller, :long_name, :view, :in_menu, :data_block, :validations
+    attr_accessor :stage, :name, :controller, :view
 
     def initialize(name, stage, *args)
       @name = name
@@ -12,25 +12,11 @@ module RestfulWorkflow
       initialize_data_class
     end
   
-    def long_name(new_val=nil)
-      @long_name = new_val if new_val
-      @long_name
-    end
-  
     def view(new_val=nil)
       @view = new_val if new_val
       @view
     end
 
-    def in_menu(new_val=nil)
-      @in_menu = new_val unless new_val.nil?
-      @in_menu
-    end
-  
-    def in_menu?
-      @in_menu
-    end
-  
     def controller_class
       stage.controller_class
     end
@@ -49,39 +35,16 @@ module RestfulWorkflow
       @after_callbacks[symbol.to_sym]
     end
 
-    def data(*args, &block)
-      options = args.extract_options!
-      if args.first
-        @data = args.first
-      elsif block_given?
-        initialize_data_class 
-        unless options[:defer]
-          @data.class_eval(&block)
-        else
-          @data_block = block
-        end
-      end
-      @data
-    end
-    
-    def validations(&block)
-      if block_given?
-        @validations.class_eval(&block)
-      end
-      @validations
-    end
-  
     def completed?
       load_data.valid?
     end
 
     def load_data
-      if attributes = controller.params[:current_object] rescue nil
-        unless controller.params[:current_object][:id].blank?
-          @data.find(controller.params[:current_object][:id])
-        else
-          @data.new(attributes)
-        end
+      attributes = controller.params[:current_object] rescue nil
+      if attributes && controller.params[:current_object][:id]
+        @data.find(controller.params[:current_object][:id])
+      elsif controller.session[:current_interview_id]
+        @data.find(controller.session[:current_interview_id])
       else
         @data.new
       end
@@ -150,19 +113,10 @@ module RestfulWorkflow
       end
     end
   
-    def eval_deferred_data_class
-      if data_block
-        initialize_data_class
-        data.controller = controller if data.respond_to?(:controller)
-        data.class_eval(&data_block) 
-      end
-    end
-  
     private
 
     def initialize_data_class
       @data = Class.new(Interview)
-      @validations = Class.new(ActiveForm)
     end
 
     def next_step
